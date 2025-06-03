@@ -1,11 +1,15 @@
 import streamlit as st
 import asyncio
+import websockets
 from threading import current_thread
 from chat_with_wenwu.streamlit_app import get_qa_history_chain, gen_response, get_available_models
 from TTS.tts import text_to_speech, initialize_tts_models
 import os
 import uuid
 import glob
+import time
+
+
 
 
 # __import__('pysqlite3')
@@ -39,6 +43,35 @@ def clean_audio_data_folder():
         except Exception as e:
             print(f"Failed to delete {f}: {e}")
 
+# 辅助函数 - 保存上传的音频
+def save_uploaded_audio(uploaded_file):
+    audio_dir = "custom_voice"
+    os.makedirs(audio_dir, exist_ok=True)
+    
+    # 生成唯一文件名
+    file_ext = os.path.splitext(uploaded_file.name)[1]
+    file_path = os.path.join(audio_dir, f"voice_sample_{int(time.time())}{file_ext}")
+    
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    return file_path
+
+# 辅助函数 - 训练音色模型
+def train_voice_model(voice_path):
+    try:
+        # 这里添加实际的音色训练逻辑
+        # 示例: 调用语音克隆API或本地模型训练
+        # 返回训练是否成功
+        
+        # 模拟训练过程
+        time.sleep(5)  # 模拟训练时间
+        return True
+    except Exception as e:
+        print(f"音色训练出错: {str(e)}")
+        return False
+
+
 def main():
     load_tts_models()
     clean_audio_data_folder()  # 每次运行清理 data/ 目录下旧音频
@@ -66,6 +99,7 @@ def main():
             st.rerun()
     
         # 添加知识库上传组件
+        st.markdown("### 自定义知识库")
         uploaded_file = st.file_uploader("上传PDF知识库", type=["pdf"])
         # if uploaded_file is not None:
         #     # 读取PDF内容
@@ -79,7 +113,38 @@ def main():
         # else:
         #     st.session_state.vectors = None
         #     st.warning("未上传知识库，AI将使用现有知识回答问题")
-    
+        # 添加自定义音色上传组件
+        st.markdown("### 自定义AI助手音色")
+        voice_sample = st.file_uploader(
+            "上传你的音色样本 (WAV格式)", 
+            type=["wav"],
+            help="上传10-30秒的清晰语音样本，用于训练AI音色"
+        )
+        
+        # 添加训练按钮
+        if st.button("训练AI音色模型"):
+            if voice_sample is not None:
+                # 保存上传的音频文件
+                voice_path = save_uploaded_audio(voice_sample)
+                
+                # 调用音色训练函数
+                with st.spinner("正在训练AI音色，这可能需要几分钟..."):
+                    success = train_voice_model(voice_path)
+                
+                if success:
+                    st.success("音色训练完成！AI助手将使用你的音色")
+                    st.session_state.custom_voice = True
+                    st.audio(voice_path, format='audio/wav')
+                else:
+                    st.error("音色训练失败，请检查音频格式后重试")
+            else:
+                st.warning("请先上传音色样本")
+        
+        # 显示当前音色状态
+        if st.session_state.get("custom_voice"):
+            st.info("当前使用自定义音色")
+        else:
+            st.info("使用默认AI音色")
     # st.session_state可以存储用户与应用交互期间的状态与数据
     # 存储对话历史
     if "messages" not in st.session_state:
@@ -131,10 +196,7 @@ def main():
         st.session_state.messages.append(("ai", output))
 
         # 生成语音文件
-        audio_file_path = f"data/{uuid.uuid4().hex}.wav"  # 使用 UUID 生成唯一文件名
-        os.makedirs("data", exist_ok=True)  # 确保 data 目录存在
-
-
+        audio_file_path = "data/audio.wav" 
         text_to_speech(output, output_audio_path=audio_file_path)
         st.audio(audio_file_path)
 if __name__ == "__main__":
