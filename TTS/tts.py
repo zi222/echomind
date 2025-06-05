@@ -6,6 +6,8 @@ from .fish_speech.models.vqgan.inference import load_model as load_vqgan_model
 import numpy as np
 from pathlib import Path
 import torch
+import os
+import time
 
 
 # 提前加载模型
@@ -29,6 +31,37 @@ def initialize_tts_models(half: bool = False):
         checkpoint_path="/root/codespace/TTS/checkpoints/fish-speech-1.5/firefly-gan-vq-fsq-8x1024-21hz-generator.pth",
         device="cuda"
     )
+# 辅助函数 - 保存上传的音频
+def save_uploaded_audio(uploaded_file):
+    audio_dir = "custom_voice"
+    os.makedirs(audio_dir, exist_ok=True)
+    
+    # 生成唯一文件名
+    file_ext = os.path.splitext(uploaded_file.name)[1]
+    file_path = os.path.join(audio_dir, f"voice_sample_{int(time.time())}{file_ext}")
+    
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    return file_path
+
+# 辅助函数 - 训练音色模型
+def train_voice_model(voice_path):
+    try:
+        # 这里添加实际的音色训练逻辑
+        # 示例: 调用语音克隆API或本地模型训练
+        # 返回训练是否成功
+        decode_to_audio(
+        input_path=Path(voice_path),
+        output_path=Path("/root/codespace/data/user_voice.wav"),
+        model=vqgan_model,
+        device="cuda",
+    )
+        return True
+    except Exception as e:
+        print(f"音色训练出错: {str(e)}")
+        return False
+
 def text_to_speech(
     text: str,
     prompt_text = ["你的参考文本"],

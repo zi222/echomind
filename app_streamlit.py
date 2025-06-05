@@ -3,7 +3,7 @@ import asyncio
 import websockets
 from threading import current_thread
 from chat_with_wenwu.streamlit_app import get_qa_history_chain, gen_response, get_available_models
-from TTS.tts import text_to_speech, initialize_tts_models
+from TTS.tts import text_to_speech, initialize_tts_models, save_uploaded_audio, train_voice_model
 import os
 import uuid
 import glob
@@ -42,34 +42,6 @@ def clean_audio_data_folder():
             os.remove(f)
         except Exception as e:
             print(f"Failed to delete {f}: {e}")
-
-# 辅助函数 - 保存上传的音频
-def save_uploaded_audio(uploaded_file):
-    audio_dir = "custom_voice"
-    os.makedirs(audio_dir, exist_ok=True)
-    
-    # 生成唯一文件名
-    file_ext = os.path.splitext(uploaded_file.name)[1]
-    file_path = os.path.join(audio_dir, f"voice_sample_{int(time.time())}{file_ext}")
-    
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    return file_path
-
-# 辅助函数 - 训练音色模型
-def train_voice_model(voice_path):
-    try:
-        # 这里添加实际的音色训练逻辑
-        # 示例: 调用语音克隆API或本地模型训练
-        # 返回训练是否成功
-        
-        # 模拟训练过程
-        time.sleep(5)  # 模拟训练时间
-        return True
-    except Exception as e:
-        print(f"音色训练出错: {str(e)}")
-        return False
 
 
 def main():
@@ -197,7 +169,11 @@ def main():
 
         # 生成语音文件
         audio_file_path = "data/audio.wav" 
-        text_to_speech(output, output_audio_path=audio_file_path)
+        # 如果用户训练过音色，则用用户音色的npy路径，否则用默认
+        user_voice_path = "/root/codespace/data/user_voice.npy"
+        prompt_tokens_path = [user_voice_path if st.session_state.get("custom_voice") and os.path.exists(user_voice_path) else "/root/codespace/TTS/fake.npy"]
+
+        text_to_speech(output,prompt_tokens_path=prompt_tokens_path, output_audio_path=audio_file_path)
         st.audio(audio_file_path)
 if __name__ == "__main__":
     main()
