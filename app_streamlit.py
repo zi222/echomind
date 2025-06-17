@@ -8,6 +8,9 @@ import os
 import uuid
 import glob
 import time
+from chat_with_wenwu.get_vector import get_vectordb
+from pathlib import Path
+from app_server import send_audio_to_cloud
 
 
 
@@ -28,8 +31,8 @@ import time
 # asyncio.set_event_loop(get_thread_loop())
 # @st.cache_resource(show_spinner="加载中...")
 @st.cache_resource(show_spinner="加载中...")
-def load_qa_chain(model="qwen1.5-14b-chat"):
-    return get_qa_history_chain(model=model)
+def load_qa_chain(model="qwen2.5-coder-32b-instruct",vectordb_path=None):
+    return get_qa_history_chain(model=model, vectordb_path=vectordb_path)
 
 @st.cache_resource(show_spinner="别急，小二马上就来...")
 def load_tts_models():
@@ -72,24 +75,32 @@ def main():
     
         # 添加知识库上传组件
         st.markdown("### 自定义知识库")
-        uploaded_file = st.file_uploader("上传PDF知识库", type=["pdf"])
-        # if uploaded_file is not None:
-        #     # 读取PDF内容
-        #     pdf_text = read_pdf_file(uploaded_file)
-        #     # 文本向量化
-        #     vectors = get_vector(pdf_text)
-        #     # 存储向量化数据
-        #     st.session_state.vectors = vectors
-        #     st.session_state.knowledge_base = uploaded_file
-        #     st.success("知识库已上传并完成向量化")
-        # else:
-        #     st.session_state.vectors = None
-        #     st.warning("未上传知识库，AI将使用现有知识回答问题")
+        uploaded_file = st.file_uploader("上传你的知识库PDF文件", type=["pdf"])
+        vectordb = None
+        if uploaded_file is not None:
+           # 保存上传的 PDF
+            knowledge_dir = Path("/root/codespace/data/knowledge_db")
+            knowledge_dir.mkdir(parents=True, exist_ok=True)
+            pdf_path = knowledge_dir / uploaded_file.name
+            with open(pdf_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            with st.spinner("正在处理知识库..."):
+                # 构建持久化向量路径
+                persist_dir = Path("/root/codespace/data/vector_db") / uploaded_file.name.replace(".pdf", "")
+                persist_dir.mkdir(parents=True, exist_ok=True)
+                st.session_state.vectordb_path = (str(pdf_path), str(persist_dir))
+                # 加载或构建向量数据库
+                get_vectordb(str(pdf_path), str(persist_dir))
+                st.success("知识库上传成功！AI助手将使用你的知识库回答问题")
+            
+        else:
+            st.session_state.vectordb_path = None
+            st.warning("未上传知识库，AI将使用现有知识回答问题")
         # 添加自定义音色上传组件
         st.markdown("### 自定义AI助手音色")
         voice_sample = st.file_uploader(
-            "上传你的音色样本 (WAV格式)", 
-            type=["wav"],
+            "上传你的音色样本 (WAV或MP3格式)", 
+            type=["wav","mp3"],
             help="上传10-30秒的清晰语音样本，用于训练AI音色"
         )
         
@@ -122,6 +133,16 @@ def main():
     if "messages" not in st.session_state:
         st.session_state.messages = []
     
+    if "vectordb_path" in st.session_state:
+        st.session_state.qa_history_chain = load_qa_chain(
+        model=selected_model,
+        vectordb_path=st.session_state.vectordb_path
+    )
+    else:
+        st.session_state.qa_history_chain = load_qa_chain(
+        model=selected_model,
+        vectordb_path=None
+    )
     # 存储当前选择的模型
     if "current_model" not in st.session_state:
         st.session_state.current_model = available_models[0]
@@ -131,12 +152,12 @@ def main():
         st.session_state.current_model = selected_model
         # 清除缓存并重新加载问答链
         load_qa_chain.clear()
-        st.session_state.qa_history_chain = load_qa_chain(model=selected_model)
+        st.session_state.qa_history_chain = load_qa_chain(model=selected_model, vectordb_path=st.session_state.vectordb_path)
         st.success(f"已切换到模型: {selected_model}")
     
     # 存储检索问答链
     if "qa_history_chain" not in st.session_state:
-        st.session_state.qa_history_chain = load_qa_chain(model=selected_model)
+        st.session_state.qa_history_chain = load_qa_chain(model=selected_model, vectordb_path=st.session_state.vectordb_path)
     
     # 建立容器 高度为500 px
     messages = st.container(height=500)
@@ -175,5 +196,7 @@ def main():
 
         text_to_speech(output,prompt_tokens_path=prompt_tokens_path, output_audio_path=audio_file_path)
         st.audio(audio_file_path)
+
+        asyncio.run(send_audio_to_cloud(audio_file_path))
 if __name__ == "__main__":
     main()

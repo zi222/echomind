@@ -9,6 +9,9 @@ from .model_to_llm import model_to_llm
 
 from threading import Thread, current_thread
 import sqlite3
+from datetime import datetime
+
+current_time = datetime.now().strftime("%Y年%m月%d日 %A %H:%M:%S")
 
 __import__('pysqlite3')
 import sys
@@ -32,7 +35,7 @@ DEFAULT_BASE_URL = "https://cloud.infini-ai.com/maas/v1/"
 def combine_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs["context"])
 
-def get_qa_history_chain(model:str="qwen1.5-14b-chat"):
+def get_qa_history_chain(model:str="qwen2.5-coder-32b-instruct",vectordb_path=None):
     llm = model_to_llm(model=model, temperature=0.2, API_KEY=GENSTUDIO_API_KEY, DEFAULT_BASE_URL=DEFAULT_BASE_URL)
 
     condense_question_system_template = (
@@ -47,23 +50,46 @@ def get_qa_history_chain(model:str="qwen1.5-14b-chat"):
             ("placeholder", "{chat_history}"),
             ("human", "{input}"),
         ])
-    vectordb = get_vectordb("/root/codespace/chat_with_wenwu/data_base/knowledge_db/national_treasure.pdf","/root/codespace/chat_with_wenwu/data_base/vector_db/chroma")
-    retriever = vectordb.as_retriever(search_kwargs={"k": 3})
-    retrieve_docs = RunnableBranch(
-        (lambda x: not x.get("chat_history", False), (lambda x: x["input"]) | retriever, ),
-        condense_question_prompt | llm | StrOutputParser() | retriever,
-    )
-
     system_prompt = (
-    "你是一个会说话的私人知识库助手，回答需满足语音播报要求：\n"
-    "1. 使用最简短的日常口语，避免复杂句式\n"
-    "2. 每句话不超过15个字，用逗号自然分隔\n" 
+    "你是一个温柔甜美的私人知识库助手，当前日期是{current_time}。\n"
+    "1. 你的语气温柔甜美，使用最简短的日常口语，避免复杂句式\n"
+    "2. 每句话尽量简短，用逗号自然分隔\n" 
     "3. 重要数字要放句首（如：'准确率82%，这个模型表现不错'）\n"
     "4. 遇到步骤说明时用'然后'连接（例如：先热锅，然后放油）\n"
-    "5. 知识库内容优先，找不到时说：'根据我的记录...'\n"
-    "6. 适当加入语气词（比如'呢'、'呀'）保持自然\n"
-    "当前知识库：\n{context}"
+    "5. 如果存在知识库，优先使用知识库内容回答，如果使用知识库，就说，根据您上传的知识库记录；如果不用知识库就不用说'\n"
+    "6. 适当加入语气词保持自然\n"
+    "当前知识库：\n{context}。我需要在周四下午1点拜访客户L，进行年度框架合同续签及上半年总结"
     )
+    vectordb = None
+    if vectordb_path:
+        try:
+            pdf_path, persist_dir = vectordb_path
+            vectordb = get_vectordb(pdf_path, persist_dir)
+        except Exception as e:
+            st.error(f"加载向量数据库失败: {e}")
+
+    if vectordb is not None:
+        retriever = vectordb.as_retriever(search_kwargs={"k": 3})
+        
+        # 定义带检索的文档获取流程
+        retrieve_docs = RunnableBranch(
+        (lambda x: not x.get("chat_history", False), (lambda x: x["input"]) | retriever, ),
+        condense_question_prompt | llm | StrOutputParser() | retriever,
+    )       
+        
+        # 定义组合文档的函数（当有检索器时使用）
+        def combine_docs_with_retriever(x):
+            docs = retrieve_docs.invoke(x)
+            return "\n\n".join(doc.page_content for doc in docs)
+
+    else:
+        print(f"无法初始化向量数据库，将不使用检索功能")
+        
+        # 定义空文档组合函数（当没有检索器时使用）
+        def combine_docs_with_retriever(x):
+            return ""
+
+
     qa_prompt = ChatPromptTemplate.from_messages(
         [
             ("system", system_prompt),
@@ -72,37 +98,37 @@ def get_qa_history_chain(model:str="qwen1.5-14b-chat"):
         ]
     )
     qa_chain = (
-        RunnablePassthrough().assign(context=combine_docs)
+        RunnablePassthrough().assign(context=combine_docs_with_retriever)
         | qa_prompt
         | llm
         | StrOutputParser()
     )
 
     qa_history_chain = RunnablePassthrough().assign(
-        context = retrieve_docs, 
+        context=combine_docs_with_retriever, 
         ).assign(answer=qa_chain)
     return qa_history_chain
 
 # 获取可用模型列表
 def get_available_models():
     return [
-        "qwen1.5-14b-chat",
+        "qwen2.5-coder-32b-instruct",
         "megrez-3b-instruct", 
-        "chatglm3",
         "llama-2-7b-chat",
         "deepseek-r1",
         "qwen3-30b-a3b",
         "glm-4-9b-chat",
         "yi-1.5-34b-chat",
         "qwen2-72b-instruct",
-        "qwen2.5-7b-instruct"
+        "qwen2.5-7b-instruct",
         "qwen2.5-coder-32b-instruct"
     ]
 
 def gen_response(chain, input, chat_history):
     response = chain.stream({
         "input": input,
-        "chat_history": chat_history
+        "chat_history": chat_history,
+        "current_time": current_time
     })
     for res in response:
         if "answer" in res.keys():
