@@ -57,7 +57,9 @@ async def send_audio_to_cloud(audio_path):
         # 发送成功，删除音频
         os.remove(audio_path)
         print(f"🗑️ 已删除本地音频文件：{audio_path}")
-
+    except asyncio.TimeoutError:
+        print("Sending keepalive ping...")
+        await websocket.ping() # 发送心跳包，保持连接状态
     except Exception as e:
         print(f"❌ WebSocket 发送失败：{e}（音频保留以便重试）")
 
@@ -75,7 +77,9 @@ async def receive_text_from_pi():
                 # 1. 调用 NLP 处理
                 # 2. 存储到数据库
                 # 3. 返回响应给树莓派
-                
+        except asyncio.TimeoutError:
+            print("Sending keepalive ping...")
+            await websocket.ping() # 发送心跳包，保持连接状态       
         except websockets.exceptions.ConnectionClosed:
             print("连接已关闭")
 

@@ -9,6 +9,7 @@ from pathlib import Path
 # 缓存问答链
 _qa_chain = None
 _selected_model = "qwen2.5-coder-32b-instruct"
+_chat_history = []
 
 def clean_audio_data_folder():
     audio_files = glob.glob("data/*.wav")
@@ -39,20 +40,42 @@ async def send_audio_to_cloud(audio_path):
         # 发送成功，删除音频
         os.remove(audio_path)
         print(f"🗑️ 已删除本地音频文件：{audio_path}")
-
+    except asyncio.TimeoutError:
+        print("Sending keepalive ping...")
+        await websocket.ping() # 发送心跳包，保持连接状态
     except Exception as e:
         print(f"❌ WebSocket 发送失败：{e}（音频保留以便重试）")
 
+def get_available_pdfs():
+    """获取knowledge_db目录下所有PDF文件"""
+    knowledge_dir = Path("/root/codespace/data/knowledge_db")
+    knowledge_dir.mkdir(parents=True, exist_ok=True)  # 确保目录存在
+    return list(knowledge_dir.glob("*.pdf"))
+
 def load_qa_chain(model="qwen2.5-coder-32b-instruct", vectordb_path=None):
-    global _qa_chain
+    global _qa_chain, _vectordb_path
     _qa_chain = get_qa_history_chain(model=model, vectordb_path=vectordb_path)
     print(f"QA chain loaded with model {model}")
 
 def initialize_models():
     print("初始化 TTS 模型...")
-    initialize_tts_models(half=True)
+    # 设置内存优化配置
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+    # 初始化TTS模型，关闭half精度以减少内存问题
+    initialize_tts_models(half=False)
     clean_audio_data_folder()
-    load_qa_chain(model=_selected_model)
+    pdf_files = get_available_pdfs()
+    if pdf_files:
+        pdf_file = pdf_files[0]  # 使用第一个PDF文件
+        pdf_path = str(pdf_file)
+        persist_dir = Path("/root/codespace/data/vector_db") / pdf_file.stem
+        persist_dir.mkdir(parents=True, exist_ok=True)
+        vectordb_path = (pdf_path, str(persist_dir))
+        print(f"自动加载语料库路径：{vectordb_path}")
+    else:
+        vectordb_path = None
+        print("警告：knowledge_db目录中没有PDF文件，将不使用知识库")
+    load_qa_chain(model=_selected_model, vectordb_path=vectordb_path)
 
 async def process_text(text):
     # 生成问答结果（同步调用，这里如果gen_response支持异步请改成await）
@@ -60,22 +83,38 @@ async def process_text(text):
     answer = gen_response(
         chain=_qa_chain,
         input=text,
-        chat_history=[],
+        chat_history=_chat_history,
     )
     # 如果answer是生成器，合并成字符串
     if hasattr(answer, '__iter__') and not isinstance(answer, str):
         output = "".join(answer)
     else:
         output = answer
+    _chat_history.append(("human", text))
+    _chat_history.append(("ai", output))
 
     print(f"生成回答: {output}")
 
     # 合成语音，输出路径固定
     audio_file_path = "data/audio.mp3"
-    # 你这里可以加自定义音色判断，这里简单用默认音色
-    prompt_tokens_path = ["/root/codespace/TTS/fake.npy"]
+    # 检查是否有自定义音色
+    user_voice_path = "/root/codespace/data/user_voice.npy"
+    prompt_tokens_path = [user_voice_path if os.path.exists(user_voice_path) else "/root/codespace/TTS/fake.npy"]
 
-    text_to_speech(output, prompt_tokens_path=prompt_tokens_path, output_audio_path=audio_file_path)
+    try:
+        text_to_speech(output, prompt_tokens_path=prompt_tokens_path, output_audio_path=audio_file_path)
+    except Exception as e:
+        print(f"语音合成失败: {e}")
+        # 清理CUDA缓存
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # 重试一次
+        try:
+            text_to_speech(output, prompt_tokens_path=prompt_tokens_path, output_audio_path=audio_file_path)
+        except Exception as e:
+            print(f"语音合成重试失败: {e}")
+            raise
     print(f"语音合成完成，路径：{audio_file_path}")
 
     # 发送音频文件
@@ -92,7 +131,9 @@ async def receive_text_from_pi():
 
                 # 收到文字后处理生成语音并发送
                 await process_text(message)
-
+        except asyncio.TimeoutError:
+            print("Sending keepalive ping...")
+            await websocket.ping() # 发送心跳包，保持连接状态
         except websockets.exceptions.ConnectionClosed as e:
             print(f"连接关闭: {e}")
         except Exception as e:
