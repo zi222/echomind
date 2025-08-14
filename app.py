@@ -64,6 +64,10 @@ def initialize_models():
     # 初始化TTS模型，关闭half精度以减少内存问题
     initialize_tts_models(half=False)
     clean_audio_data_folder()
+    load_qa_chain(model=_selected_model, vectordb_path=None)
+
+async def process_text(text):
+    # 检查是否有新的PDF知识库
     pdf_files = get_available_pdfs()
     if pdf_files:
         pdf_file = pdf_files[0]  # 使用第一个PDF文件
@@ -71,13 +75,18 @@ def initialize_models():
         persist_dir = Path("/root/codespace/data/vector_db") / pdf_file.stem
         persist_dir.mkdir(parents=True, exist_ok=True)
         vectordb_path = (pdf_path, str(persist_dir))
-        print(f"自动加载语料库路径：{vectordb_path}")
+        
+            
+        print(f"检测到知识库文件：{pdf_path}，更新QA链...")
+        try:
+            load_qa_chain(model=_selected_model, vectordb_path=vectordb_path)
+        except Exception as e:
+            print(f"加载QA链失败: {e}")
+            print("将使用无知识库模式继续...")
+            load_qa_chain(model=_selected_model, vectordb_path=None)
     else:
-        vectordb_path = None
-        print("警告：knowledge_db目录中没有PDF文件，将不使用知识库")
-    load_qa_chain(model=_selected_model, vectordb_path=vectordb_path)
+        print("未检测到知识库文件，使用现有QA链")
 
-async def process_text(text):
     # 生成问答结果（同步调用，这里如果gen_response支持异步请改成await）
     print(f"收到文本，生成回答：{text}")
     answer = gen_response(
