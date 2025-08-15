@@ -5,6 +5,7 @@ import glob
 from chat_with_wenwu.streamlit_app import get_qa_history_chain, gen_response, get_available_models
 from TTS.tts import text_to_speech, initialize_tts_models
 from pathlib import Path
+from weather_mcp.MCPClient import MCPClient
 
 # 缓存问答链
 _qa_chain = None
@@ -65,8 +66,30 @@ def initialize_models():
     initialize_tts_models(half=False)
     clean_audio_data_folder()
     load_qa_chain(model=_selected_model, vectordb_path=None)
-
-async def process_text(text):
+async def get_weather_info(city: str) -> str:
+    """获取指定城市的天气信息"""
+    client = MCPClient()
+    try:
+        # 设置超时为30秒
+        await asyncio.wait_for(
+            client.connect_to_server("weather_mcp/server.py"),
+            timeout=30.0
+        )
+        weather_info = await asyncio.wait_for(
+            client.process_query(f"{city}的天气"),
+            timeout=30.0
+        )
+        return weather_info
+    except asyncio.TimeoutError:
+        return "天气查询超时，请稍后再试"
+    except Exception as e:
+        return f"获取天气信息失败: {str(e)}"
+    finally:
+        try:
+            await asyncio.wait_for(client.cleanup(), timeout=5.0)
+        except:
+            pass  # 确保无论如何都能继续
+async def process_text(input):
     # 检查是否有新的PDF知识库
     pdf_files = get_available_pdfs()
     if pdf_files:
@@ -88,10 +111,46 @@ async def process_text(text):
         print("未检测到知识库文件，使用现有QA链")
 
     # 生成问答结果（同步调用，这里如果gen_response支持异步请改成await）
-    print(f"收到文本，生成回答：{text}")
+    print(f"收到文本，生成回答：{input}")
+    # 简单的中文城市名到英文映射
+    city_mapping = {
+        "北京": "Beijing",
+        "上海": "Shanghai",
+        "广州": "Guangzhou",
+        "深圳": "Shenzhen",
+        "杭州": "Hangzhou",
+        "成都": "Chengdu"
+    }
+    
+    # 检查是否询问天气
+    if "天气" in input:
+        # 尝试提取城市名
+        city_cn = next((c for c in city_mapping if c in input), "北京")
+        city_en = city_mapping[city_cn]
+        
+        try:
+            # 获取当前事件循环
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果事件循环已在运行，创建新线程处理异步调用
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor() as executor:
+                    weather_info = executor.submit(
+                        lambda: asyncio.run(get_weather_info(city_en))
+                    ).result()
+            else:
+                # 否则直接运行
+                weather_info = loop.run_until_complete(get_weather_info(city_en))
+            
+            # 将天气信息合并到输入中
+            input = f"{input}\n当前{city_cn}天气信息:\n{weather_info}"
+        except Exception as e:
+            print(f"天气查询异常: {e}")
+            input = f"{input}\n[天气查询服务暂时不可用]"
+
     answer = gen_response(
         chain=_qa_chain,
-        input=text,
+        input=input,
         chat_history=_chat_history,
     )
     # 如果answer是生成器，合并成字符串
@@ -99,7 +158,7 @@ async def process_text(text):
         output = "".join(answer)
     else:
         output = answer
-    _chat_history.append(("human", text))
+    _chat_history.append(("human", input))
     _chat_history.append(("ai", output))
 
     print(f"生成回答: {output}")

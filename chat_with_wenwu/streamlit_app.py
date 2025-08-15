@@ -3,7 +3,7 @@ import asyncio
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableBranch, RunnablePassthrough
-from weather_mcp.MCPClient import MCPClient
+
 # sys.path.append("./data_base") # 将父目录放入系统路径中
 from .get_vector import get_vectordb
 from .model_to_llm import model_to_llm
@@ -124,67 +124,10 @@ def get_available_models():
         "qwen2.5-coder-32b-instruct"
     ]
 
-async def get_weather_info(city: str) -> str:
-    """获取指定城市的天气信息"""
-    client = MCPClient()
-    try:
-        # 设置超时为10秒
-        await asyncio.wait_for(
-            client.connect_to_server("weather_mcp/server.py"),
-            timeout=10.0
-        )
-        weather_info = await asyncio.wait_for(
-            client.process_query(f"{city}的天气"),
-            timeout=10.0
-        )
-        return weather_info
-    except asyncio.TimeoutError:
-        return "天气查询超时，请稍后再试"
-    except Exception as e:
-        return f"获取天气信息失败: {str(e)}"
-    finally:
-        try:
-            await asyncio.wait_for(client.cleanup(), timeout=5.0)
-        except:
-            pass  # 确保无论如何都能继续
+
 
 def gen_response(chain, input, chat_history):
-    # 简单的中文城市名到英文映射
-    city_mapping = {
-        "北京": "Beijing",
-        "上海": "Shanghai",
-        "广州": "Guangzhou",
-        "深圳": "Shenzhen",
-        "杭州": "Hangzhou",
-        "成都": "Chengdu"
-    }
     
-    # 检查是否询问天气
-    if "天气" in input:
-        # 尝试提取城市名
-        city_cn = next((c for c in city_mapping if c in input), "北京")
-        city_en = city_mapping[city_cn]
-        
-        try:
-            # 获取当前事件循环
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 如果事件循环已在运行，创建新线程处理异步调用
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor() as executor:
-                    weather_info = executor.submit(
-                        lambda: asyncio.run(get_weather_info(city_en))
-                    ).result()
-            else:
-                # 否则直接运行
-                weather_info = loop.run_until_complete(get_weather_info(city_en))
-            
-            # 将天气信息合并到输入中
-            input = f"{input}\n当前{city_cn}天气信息:\n{weather_info}"
-        except Exception as e:
-            print(f"天气查询异常: {e}")
-            input = f"{input}\n[天气查询服务暂时不可用]"
-
     response = chain.stream({
         "input": input,
         "chat_history": chat_history,

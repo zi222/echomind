@@ -3,8 +3,10 @@ from audio_recorder_streamlit import audio_recorder
 import asyncio
 import websockets
 from threading import current_thread
+from concurrent.futures import ThreadPoolExecutor
 from chat_with_wenwu.streamlit_app import get_qa_history_chain, gen_response, get_available_models
 from TTS.tts import text_to_speech, initialize_tts_models, save_uploaded_audio, train_voice_model
+from weather_mcp.MCPClient import MCPClient
 import os
 import uuid
 import glob
@@ -37,6 +39,30 @@ def load_qa_chain(model="qwen2.5-coder-32b-instruct",vectordb_path=None):
 @st.cache_resource(show_spinner="别急，小二马上就来...")
 def load_tts_models():
     initialize_tts_models(half=True)
+
+async def get_weather_info(city: str) -> str:
+    """获取指定城市的天气信息"""
+    client = MCPClient()
+    try:
+        # 设置超时为30秒
+        await asyncio.wait_for(
+            client.connect_to_server("weather_mcp/server.py"),
+            timeout=30.0
+        )
+        weather_info = await asyncio.wait_for(
+            client.process_query(f"{city}的天气"),
+            timeout=30.0
+        )
+        return weather_info
+    except asyncio.TimeoutError:
+        return "天气查询超时，请稍后再试"
+    except Exception as e:
+        return f"获取天气信息失败: {str(e)}"
+    finally:
+        try:
+            await asyncio.wait_for(client.cleanup(), timeout=5.0)
+        except:
+            pass  # 确保无论如何都能继续
 
 def clean_audio_data_folder():
     audio_files = glob.glob("data/*.wav")
@@ -311,6 +337,35 @@ def main():
         with messages.chat_message("human"):
             st.write(prompt)
         
+
+        # 简单的中文城市名到英文映射
+        city_mapping = {
+            "北京": "Beijing",
+            "上海": "Shanghai",
+            "广州": "Guangzhou",
+            "深圳": "Shenzhen",
+            "杭州": "Hangzhou",
+            "成都": "Chengdu"
+        }
+        
+        # 检查是否询问天气
+        if "天气" in prompt:
+            # 尝试提取城市名
+            city_cn = next((c for c in city_mapping if c in prompt), "北京")
+            city_en = city_mapping[city_cn]
+            
+            try:
+                # 使用线程池处理异步调用
+                with ThreadPoolExecutor() as executor:
+                    weather_info = executor.submit(
+                        lambda: asyncio.run(get_weather_info(city_en))
+                    ).result()
+                
+                # 将天气信息合并到输入中
+                prompt = f"{prompt}\n当前{city_cn}天气信息:\n{weather_info}"
+            except Exception as e:
+                print(f"天气查询异常: {e}")
+                prompt = f"{prompt}\n[天气查询服务暂时不可用]"
 
         # 生成回复（带知识库检索）
         answer = gen_response(
