@@ -101,6 +101,27 @@ def main():
     
     # 在侧边栏添加模型选择
     with st.sidebar:
+        # MCP服务配置
+        st.markdown("### MCP服务")
+        st.markdown("#### 目前支持的MCP服务有：天气查询")
+        with st.form("weather_mcp_settings"):
+            # 从配置文件读取初始值
+            import json
+            config = {"use_weather_mcp": False}
+            try:
+                with open("weather_mcp/config.json") as f:
+                    config = json.load(f)
+            except:
+                pass
+                
+            use_mcp = st.checkbox("启用天气MCP服务", value=config["use_weather_mcp"])
+            
+            if st.form_submit_button("确认设置"):
+                st.session_state.use_weather_mcp = use_mcp
+                # 保存到配置文件
+                with open("weather_mcp/config.json", "w") as f:
+                    json.dump({"use_weather_mcp": use_mcp}, f)
+                st.success("天气MCP服务设置已更新")
         st.markdown("### 模型设置")
         selected_model = st.selectbox(
             "选择AI模型",
@@ -257,7 +278,8 @@ def main():
             st.success("当前使用你的自定义音色")
         else:
             st.info("使用默认AI音色") #  
-    
+
+        
 
         # # 添加自定义音色上传组件
         # st.markdown("### 自定义AI助手音色")
@@ -348,8 +370,8 @@ def main():
             "成都": "Chengdu"
         }
         
-        # 检查是否询问天气
-        if "天气" in prompt:
+        # 检查是否询问天气且启用了MCP服务
+        if "天气" in prompt and st.session_state.get("use_weather_mcp", False):
             # 尝试提取城市名
             city_cn = next((c for c in city_mapping if c in prompt), "北京")
             city_en = city_mapping[city_cn]

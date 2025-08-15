@@ -122,12 +122,16 @@ async def process_text(input):
         "成都": "Chengdu"
     }
     
-    # 检查是否询问天气
-    if "天气" in input:
-        # 尝试提取城市名
-        city_cn = next((c for c in city_mapping if c in input), "北京")
-        city_en = city_mapping[city_cn]
-        
+    # 检查是否询问天气且启用了MCP服务
+    try:
+        import json
+        with open("weather_mcp/config.json") as f:
+            config = json.load(f)
+        use_weather_mcp = config.get("use_weather_mcp", False)
+    except:
+        use_weather_mcp = False
+    
+    if "天气" in input and use_weather_mcp:
         try:
             # 获取当前事件循环
             loop = asyncio.get_event_loop()
@@ -136,14 +140,14 @@ async def process_text(input):
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor() as executor:
                     weather_info = executor.submit(
-                        lambda: asyncio.run(get_weather_info(city_en))
+                        lambda: asyncio.run(get_weather_info(input))
                     ).result()
             else:
                 # 否则直接运行
-                weather_info = loop.run_until_complete(get_weather_info(city_en))
+                weather_info = loop.run_until_complete(get_weather_info(input))
             
             # 将天气信息合并到输入中
-            input = f"{input}\n当前{city_cn}天气信息:\n{weather_info}"
+            input = f"{input}\n{weather_info}"
         except Exception as e:
             print(f"天气查询异常: {e}")
             input = f"{input}\n[天气查询服务暂时不可用]"
