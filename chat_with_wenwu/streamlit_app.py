@@ -112,7 +112,7 @@ def get_qa_history_chain(model:str="qwen2.5-coder-32b-instruct",vectordb_path=No
 # 获取可用模型列表
 def get_available_models():
     return [
-        "qwen2.5-coder-32b-instruct",
+        "qwen2.5-32b-instruct",
         "megrez-3b-instruct", 
         "llama-2-7b-chat",
         "deepseek-r1",

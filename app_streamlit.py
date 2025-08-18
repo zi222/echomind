@@ -101,27 +101,7 @@ def main():
     
     # 在侧边栏添加模型选择
     with st.sidebar:
-        # MCP服务配置
-        st.markdown("### MCP服务")
-        st.markdown("#### 目前支持的MCP服务有：天气查询")
-        with st.form("weather_mcp_settings"):
-            # 从配置文件读取初始值
-            import json
-            config = {"use_weather_mcp": False}
-            try:
-                with open("weather_mcp/config.json") as f:
-                    config = json.load(f)
-            except:
-                pass
-                
-            use_mcp = st.checkbox("启用天气MCP服务", value=config["use_weather_mcp"])
-            
-            if st.form_submit_button("确认设置"):
-                st.session_state.use_weather_mcp = use_mcp
-                # 保存到配置文件
-                with open("weather_mcp/config.json", "w") as f:
-                    json.dump({"use_weather_mcp": use_mcp}, f)
-                st.success("天气MCP服务设置已更新")
+        
         st.markdown("### 模型设置")
         selected_model = st.selectbox(
             "选择AI模型",
@@ -313,6 +293,27 @@ def main():
         #     st.info("当前使用自定义音色")
         # else:
         #     st.info("使用默认AI音色")
+        # MCP服务配置
+        st.markdown("### MCP服务")
+        st.markdown("#### 目前支持的MCP服务有：天气查询")
+        with st.form("weather_mcp_settings"):
+            # 从配置文件读取初始值
+            import json
+            config = {"use_weather_mcp": False}
+            try:
+                with open("weather_mcp/config.json") as f:
+                    config = json.load(f)
+            except:
+                pass
+                
+            use_mcp = st.checkbox("启用天气MCP服务", value=config["use_weather_mcp"])
+            
+            if st.form_submit_button("确认设置"):
+                st.session_state.use_weather_mcp = use_mcp
+                # 保存到配置文件
+                with open("weather_mcp/config.json", "w") as f:
+                    json.dump({"use_weather_mcp": use_mcp}, f)
+                st.success("天气MCP服务设置已更新")
     # st.session_state可以存储用户与应用交互期间的状态与数据
     # 存储对话历史
     if "messages" not in st.session_state:
